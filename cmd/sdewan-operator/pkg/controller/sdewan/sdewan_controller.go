@@ -2,6 +2,8 @@ package sdewan
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	sdewanv1alpha1 "sdewan-operator/pkg/apis/sdewan/v1alpha1"
 
@@ -136,11 +138,23 @@ func newPodForCR(cr *sdewanv1alpha1.Sdewan) *corev1.Pod {
 		"app": cr.Name,
 	}
 	priv := true
+	netInterfaces := make(map[string]string)
+	for i, netname := range cr.Spec.Networks {
+		netInterfaces[netname] = fmt.Sprintf("net%d", i)
+	}
+	netStrings := []string{}
+	for netname, interf := range netInterfaces {
+		netStrings = append(netStrings, fmt.Sprintf("{ \"name\": \"%s\", \"interface\": \"%s\", \"defaultGateway\": \"false\"}", netname, interf))
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cr.Name + "-pod",
 			Namespace: cr.Namespace,
 			Labels:    labels,
+			Annotations:    map[string]string{
+				"k8s.v1.cni.cncf.io/networks": `[{ "name": "ovn-networkobj"}]`,
+				"k8s.plugin.opnfv.org/nfn-network": `{ "type": "ovn4nfv", "interface": [` + strings.Join(netStrings, ", ") + "]}",
+			},
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{

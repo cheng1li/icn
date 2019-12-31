@@ -6,4 +6,4 @@ spec:
   # Add fields here
   node: "ubuntu18"
   networks:
-    - net1
+    - ovn-priv-net
