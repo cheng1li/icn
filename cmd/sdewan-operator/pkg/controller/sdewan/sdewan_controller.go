@@ -3,7 +3,8 @@ package sdewan
 import (
 	"context"
 	"fmt"
-	"strings"
+	"encoding/json"
+	"reflect"
 
 	sdewanv1alpha1 "sdewan-operator/pkg/apis/sdewan/v1alpha1"
 
@@ -23,6 +24,7 @@ import (
 )
 
 var log = logf.Log.WithName("controller_sdewan")
+var OpenwrtTag = "hle2/openwrt-1806-mwan3:latest"
 
 /**
 * USER ACTION REQUIRED: This is a scaffold file intended for the user to modify with their own Controller
@@ -102,7 +104,33 @@ func (r *ReconcileSdewan) Reconcile(request reconcile.Request) (reconcile.Result
 		// Error reading the object - requeue the request.
 		return reconcile.Result{}, err
 	}
+	for i, network := range instance.Spec.Networks {
+		if network.Interface == "" {
+			instance.Spec.Networks[i].Interface = fmt.Sprintf("net%d", i)
+		}
+	}
 
+	cm := newConfigmapForCR(instance)
+	if err := controllerutil.SetControllerReference(instance, cm, r.scheme); err != nil {
+		return reconcile.Result{}, err
+	}
+	foundcm := &corev1.ConfigMap{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: cm.Name, Namespace: cm.Namespace}, foundcm)
+	if err != nil && errors.IsNotFound(err) {
+		reqLogger.Info("Creating a new Configmap", "Configmap.Namespace", cm.Namespace, "Configmap.Name", cm.Name)
+		err = r.client.Create(context.TODO(), cm)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	} else if err != nil && reflect.DeepEqual(foundcm.Data, cm.Data) {
+		reqLogger.Info("Updating Configmap", "Configmap.Namespace", cm.Namespace, "Configmap.Name", cm.Name)
+		err = r.client.Update(context.TODO(), cm)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+	} else if err != nil {
+		return reconcile.Result{}, err
+	}
 	// Define a new Pod object
 	pod := newPodForCR(instance)
 
@@ -133,42 +161,116 @@ func (r *ReconcileSdewan) Reconcile(request reconcile.Request) (reconcile.Result
 }
 
 // newPodForCR returns a busybox pod with the same name/namespace as the cr
+func newConfigmapForCR(cr *sdewanv1alpha1.Sdewan) *corev1.ConfigMap {
+	netjson, _ := json.MarshalIndent(cr.Spec.Networks, "", "  ")
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cr.Name,
+			Namespace: cr.Namespace,
+		},
+		Data: map[string]string{
+			"networks.json": string(netjson),
+			"entrypoint.sh": `#!/bin/bash
+# Always exit on errors.
+set -e
+
+echo "" > /etc/config/network
+for net in $(jq -c ".[]" /tmp/sdewan/networks.json)
+do
+  interface=$(echo $net | jq -r .interface)
+  ipaddr=$(ifconfig $interface | awk '/inet/{print $2}' | cut -f2 -d ":" | awk 'NR==1 {print $1}')
+  if [ "$isProvider" == "true" ] || [ "$isProvider" == "1" ]]
+  then
+    vif="wan_$interface"
+  else
+    vif="lan_$interface"
+  fi
+  netmask=$(ifconfig $interface | awk '/inet/{print $4}' | cut -f2 -d ":" | awk 'NR==1 {print $1}')
+  cat >> /etc/config/network <<EOF
+config interface '$vif'
+    option ifname '$interface'
+    option proto 'static'
+    option ipaddr '$ipaddr'
+    option netmask '$netmask'
+EOF
+done
+
+/sbin/procd &
+/sbin/ubusd &
+iptables -S
+sleep 1
+/etc/init.d/rpcd start
+/etc/init.d/dnsmasq start
+/etc/init.d/network start
+/etc/init.d/odhcpd start
+/etc/init.d/uhttpd start
+/etc/init.d/log start
+/etc/init.d/dropbear start
+/etc/init.d/mwan3 restart
+
+echo "Entering sleep... (success)"
+
+# Sleep forever.
+while true; do sleep 100; done`,
+		},
+	}
+}
+// newPodForCR returns a busybox pod with the same name/namespace as the cr
 func newPodForCR(cr *sdewanv1alpha1.Sdewan) *corev1.Pod {
 	labels := map[string]string{
 		"app": cr.Name,
 	}
 	priv := true
-	netInterfaces := make(map[string]string)
-	for i, netname := range cr.Spec.Networks {
-		netInterfaces[netname] = fmt.Sprintf("net%d", i)
+	var netmaps []map[string]interface{}
+	for _, net := range cr.Spec.Networks {
+		netmaps = append(netmaps, map[string]interface{}{
+			"name": net.Name,
+			"interface": net.Interface,
+			"defaultGateway": fmt.Sprintf("%t", net.DefaultGateway),
+		})
 	}
-	netStrings := []string{}
-	for netname, interf := range netInterfaces {
-		netStrings = append(netStrings, fmt.Sprintf("{ \"name\": \"%s\", \"interface\": \"%s\", \"defaultGateway\": \"false\"}", netname, interf))
+	netjson, _ := json.MarshalIndent(netmaps, "", "  ")
+	volumes := []corev1.Volume{
+		{
+			Name: cr.Name,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: cr.Name},
+				},
+			},
+		},
 	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      cr.Name + "-pod",
+			Name:      cr.Name,
 			Namespace: cr.Namespace,
 			Labels:    labels,
 			Annotations:    map[string]string{
 				"k8s.v1.cni.cncf.io/networks": `[{ "name": "ovn-networkobj"}]`,
-				"k8s.plugin.opnfv.org/nfn-network": `{ "type": "ovn4nfv", "interface": [` + strings.Join(netStrings, ", ") + "]}",
+				"k8s.plugin.opnfv.org/nfn-network": `{ "type": "ovn4nfv", "interface": ` + string(netjson) + "}",
 			},
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{
 					Name:    "sdewan",
-					Image:   "hle2/openwrt-1806-mwan3:v0.1.0",
-					Command: []string{"/bin/sleep", "3600"},
+					Image:   OpenwrtTag,
+					Command: []string{"/bin/sh", "/tmp/sdewan/entrypoint.sh"},
 					ImagePullPolicy: corev1.PullIfNotPresent,
 					SecurityContext: &corev1.SecurityContext{
 						Privileged: &priv,
 					},
+					VolumeMounts: []corev1.VolumeMount{
+						{
+							Name: cr.Name,
+							ReadOnly: true,
+							MountPath: "/tmp/sdewan",
+						},
+					},
 				},
 			},
 			NodeSelector: map[string]string{"kubernetes.io/hostname": cr.Spec.Node},
+			Volumes: volumes,
 		},
 	}
 }

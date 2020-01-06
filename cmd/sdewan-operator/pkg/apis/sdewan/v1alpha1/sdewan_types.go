@@ -8,12 +8,20 @@ import (
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // SdewanSpec defines the desired state of Sdewan
+type Network struct {
+	Name string  `json:"name"`
+	IsProvider bool  `json:"isProvider"`
+	Interface string  `json:"interface"`
+	DefaultGateway bool  `json:"defaultGateway"`
+}
+
+// SdewanSpec defines the desired state of Sdewan
 type SdewanSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
 	Node string  `json:"node"`
-	Networks []string  `json:"networks"`
+	Networks []Network  `json:"networks"`
 }
 
 // SdewanStatus defines the observed state of Sdewan

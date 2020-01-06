@@ -33,7 +33,21 @@ spec:
           properties:
             networks:
               items:
-                type: string
+                description: SdewanSpec defines the desired state of Sdewan
+                properties:
+                  defaultGateway:
+                    type: boolean
+                  interface:
+                    type: string
+                  isProvider:
+                    type: boolean
+                  name:
+                    type: string
+                required:
+                - defaultGateway
+                - isProvider
+                - name
+                type: object
               type: array
             node:
               description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
