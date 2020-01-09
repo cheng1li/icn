@@ -44,8 +44,6 @@ spec:
                   name:
                     type: string
                 required:
-                - defaultGateway
-                - isProvider
                 - name
                 type: object
               type: array

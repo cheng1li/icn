@@ -122,14 +122,16 @@ func (r *ReconcileSdewan) Reconcile(request reconcile.Request) (reconcile.Result
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-	} else if err != nil && reflect.DeepEqual(foundcm.Data, cm.Data) {
+	} else if err != nil {
+		return reconcile.Result{}, err
+	} else if reflect.DeepEqual(foundcm.Data, cm.Data) {
 		reqLogger.Info("Updating Configmap", "Configmap.Namespace", cm.Namespace, "Configmap.Name", cm.Name)
 		err = r.client.Update(context.TODO(), cm)
 		if err != nil {
 			return reconcile.Result{}, err
 		}
-	} else if err != nil {
-		return reconcile.Result{}, err
+	} else {
+		reqLogger.Info("Configmap not changed", "Configmap.Namespace", foundcm.Namespace, "Configmap.Name", foundcm.Name)
 	}
 	// Define a new Pod object
 	pod := newPodForCR(instance)
@@ -140,8 +142,8 @@ func (r *ReconcileSdewan) Reconcile(request reconcile.Request) (reconcile.Result
 	}
 
 	// Check if this Pod already exists
-	found := &corev1.Pod{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, found)
+	foundpod := &corev1.Pod{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace}, foundpod)
 	if err != nil && errors.IsNotFound(err) {
 		reqLogger.Info("Creating a new Pod", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 		err = r.client.Create(context.TODO(), pod)
@@ -150,17 +152,60 @@ func (r *ReconcileSdewan) Reconcile(request reconcile.Request) (reconcile.Result
 		}
 
 		// Pod created successfully - don't requeue
-		return reconcile.Result{}, nil
+                reqLogger.Info("A new Pod created", "Pod.Namespace", pod.Namespace, "Pod.Name", pod.Name)
 	} else if err != nil {
 		return reconcile.Result{}, err
+	} else {
+		// Pod already exists - don't requeue
+		reqLogger.Info("Pod already exists", "Pod.Namespace", foundpod.Namespace, "Pod.Name", foundpod.Name)
 	}
 
-	// Pod already exists - don't requeue
-	reqLogger.Info("Skip reconcile: Pod already exists", "Pod.Namespace", found.Namespace, "Pod.Name", found.Name)
+        svc := newSvcForCR(instance)
+	// Set Sdewan instance as the owner and controller
+	if err := controllerutil.SetControllerReference(instance, svc, r.scheme); err != nil {
+		return reconcile.Result{}, err
+	}
+        // Check if this svc already exists
+        foundsvc := &corev1.Service{}
+        err = r.client.Get(context.TODO(), types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}, foundsvc)
+        if err != nil && errors.IsNotFound(err) {
+                reqLogger.Info("Creating a new Service", "Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
+                err = r.client.Create(context.TODO(), svc)
+                if err != nil {
+                        return reconcile.Result{}, err
+                }
+                reqLogger.Info("A new Service created", "Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
+        } else if err != nil {
+                return reconcile.Result{}, err
+        } else {
+                reqLogger.Info("Service already exists", "Service.Namespace", foundsvc.Namespace, "Service.Name", foundsvc.Name)
+        }
+
 	return reconcile.Result{}, nil
 }
 
-// newPodForCR returns a busybox pod with the same name/namespace as the cr
+// newSvcForCR returns a busybox pod with the same name/namespace as the cr
+func newSvcForCR(cr *sdewanv1alpha1.Sdewan) *corev1.Service {
+	return &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      cr.Name,
+			Namespace: cr.Namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort {
+				{
+					Name: "api",
+					Port: 80,
+				},
+			},
+			Selector: map[string]string{
+				"app": cr.Name,
+			},
+		},
+	}
+}
+
+// newConfigmapForCR returns a busybox pod with the same name/namespace as the cr
 func newConfigmapForCR(cr *sdewanv1alpha1.Sdewan) *corev1.ConfigMap {
 	netjson, _ := json.MarshalIndent(cr.Spec.Networks, "", "  ")
 	return &corev1.ConfigMap{
