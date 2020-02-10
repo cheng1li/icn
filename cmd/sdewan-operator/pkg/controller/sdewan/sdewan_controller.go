@@ -220,6 +220,11 @@ func newConfigmapForCR(cr *sdewanv1alpha1.Sdewan) *corev1.ConfigMap {
 set -e
 
 echo "" > /etc/config/network
+cat > /etc/config/mwan3 <<EOF
+config globals 'globals'
+    option mmx_mask '0x3F00'
+    option local_source 'lan'
+EOF
 for net in $(jq -c ".[]" /tmp/sdewan/networks.json)
 do
   interface=$(echo $net | jq -r .interface)
@@ -237,6 +242,21 @@ config interface '$vif'
     option proto 'static'
     option ipaddr '$ipaddr'
     option netmask '$netmask'
+EOF
+  cat >> /etc/config/mwan3 <<EOF
+config interface '$vif'
+        option enabled '1'
+        option family 'ipv4'
+        option reliability '2'
+        option count '1'
+        option timeout '2'
+        option failure_latency '1000'
+        option recovery_latency '500'
+        option failure_loss '20'
+        option recovery_loss '5'
+        option interval '5'
+        option down '3'
+        option up '8'
 EOF
 done
 
