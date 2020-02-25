@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    k8s.v1.cni.cncf.io/networks: '[{ "name": "ovn-networkobj"}]'
+    k8s.plugin.opnfv.org/nfn-network: '{ "type": "ovn4nfv", "interface": [ { "name": "ovn-priv-net", "interface": "vhostnet1" , "defaultGateway": "false"}]}'
+  name: testpmd
+  labels:
+    name: testpmd
+spec:
+  hostname: testpmd
+  subdomain: default-subdomain
+  containers:
+  - image: testpmd
+    imagePullPolicy: IfNotPresent
+    command:
+      - sleep
+      - "3600"
+    name: testpmd
+    securityContext:
+      privileged: true
+    resources:
+      limits:
+        hugepages-1Gi: 1Gi
+        memory: 1Gi
+    volumeMounts:
+      - mountPath: /var/ovs-run
+        name: ovs-run
+      - mountPath: /dev/hugepages
+        name: hugepages
+  volumes:
+  - name: ovs-run
+    hostPath:
+      path: /usr/local/var/run/openvswitch/
+      type: Directory
+  - name: hugepages
+    emptyDir:
+      medium: HugePages

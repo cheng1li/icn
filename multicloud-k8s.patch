@@ -1,0 +1,13 @@
+diff --git a/kud/deployment_infra/playbooks/configure-ovn4nfv.yml b/kud/deployment_infra/playbooks/configure-ovn4nfv.yml
+index b335f8c..c2e7a80 100644
+--- a/kud/deployment_infra/playbooks/configure-ovn4nfv.yml
++++ b/kud/deployment_infra/playbooks/configure-ovn4nfv.yml
+@@ -7,7 +7,7 @@
+ # which accompanies this distribution, and is available at
+ # http://www.apache.org/licenses/LICENSE-2.0
+ ##############################################################################
+-- import_playbook: configure-ovn.yml
++#- import_playbook: configure-ovn.yml
+ - import_playbook: configure-multus.yml
+ 
+ - hosts: localhost

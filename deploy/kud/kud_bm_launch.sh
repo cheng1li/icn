@@ -12,7 +12,11 @@ function get_kud_repo {
 
     mkdir -p $DOWNLOAD_PATH
     pushd $DOWNLOAD_PATH
-    git clone https://github.com/onap/multicloud-k8s.git
+    # git clone https://github.com/onap/multicloud-k8s.git
+    git clone "https://gerrit.onap.org/r/multicloud/k8s" multicloud-k8s
+    pushd multicloud-k8s
+    git apply /vagrant/multicloud-k8s.patch
+    popd
     popd
 }
 
